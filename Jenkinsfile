@@ -5,6 +5,7 @@ pipeline {
         DOCKERHUB_USERNAME = 'pasindu2001'
         BACKEND_IMAGE      = "${DOCKERHUB_USERNAME}/medicare-backend"
         FRONTEND_IMAGE     = "${DOCKERHUB_USERNAME}/medicare-frontend"
+        MONGO_URI          = credentials('mongo-uri')
     }
 
     stages {
@@ -53,7 +54,6 @@ pipeline {
                                 -var="aws_access_key=$AWS_ACCESS_KEY" \
                                 -var="aws_secret_key=$AWS_SECRET_KEY"
                         '''
-                        // Capture the EC2 IP output from Terraform
                         script {
                             env.EC2_IP = sh(
                                 script: 'terraform output -raw ec2_public_ip',
@@ -69,27 +69,25 @@ pipeline {
         stage('Ansible Deploy') {
             steps {
                 echo "Deploying to EC2 at ${env.EC2_IP}..."
-                // Write the real EC2 IP into Ansible inventory
-                sh """
-                    sed -i 's/ansible_host=[0-9.]*/ansible_host=${env.EC2_IP}/' ansible/inventory.ini
-                """
-                // Copy the SSH key into Jenkins home
+
+                sh "sed -i 's/ansible_host=[0-9.]*/ansible_host=${env.EC2_IP}/' ansible/inventory.ini"
+
+                sh 'echo "Waiting 30s for EC2 to fully boot..." && sleep 30'
+
                 withCredentials([
                     sshUserPrivateKey(
                         credentialsId: 'ec2-ssh-key',
                         keyFileVariable: 'SSH_KEY'
-                    ),
-                    string(credentialsId: 'aws-secret-access-key', variable: 'MONGO_URI')
+                    )
                 ]) {
                     sh """
-                        # Disable strict host checking so Ansible doesn't hang
                         export ANSIBLE_HOST_KEY_CHECKING=False
-                        export MONGO_URI='${env.MONGO_URI}'
-
                         ansible-playbook ansible/deploy.yml \
                             -i ansible/inventory.ini \
-                            --private-key $SSH_KEY \
-                            -u ubuntu
+                            --private-key \$SSH_KEY \
+                            -u ubuntu \
+                            -e "mongo_uri='${env.MONGO_URI}'" \
+                            -e "ec2_public_ip=${env.EC2_IP}"
                     """
                 }
             }
