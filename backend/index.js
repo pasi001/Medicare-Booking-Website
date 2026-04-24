@@ -24,7 +24,7 @@ app.get("/", (req, res) => {
 })
 
 //database connection
-mongoose.set('strictQuery', false)
+// mongoose.set('strictQuery', false)
 const connectDB = async () => {
     try {
         await mongoose.connect(process.env.MONGO_URL)
@@ -46,7 +46,8 @@ app.use('/api/v1/doctors', doctorRoutes)
 app.use('/api/v1/reviews', reviewRoutes)
 app.use('/api/v1/bookings', bookingRoute)
 
-app.listen(port, () => {
-    connectDB();
-    console.log("Server is running on port: " + port)
-})
+connectDB().then(() => {
+    app.listen(port, () => {
+        console.log("Server is running on port: " + port);
+    });
+});
