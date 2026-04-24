@@ -1,0 +1,57 @@
+---
+- name: Deploy Medicare App to EC2
+  hosts: ec2
+  become: true
+
+  vars:
+    mongo_uri: "{{ lookup('env', 'MONGO_URI') }}"
+    ec2_public_ip: "{{ ansible_host }}"
+    dockerhub_username: "pasindu2001"
+
+  tasks:
+
+    - name: Update apt packages
+      apt:
+        update_cache: yes
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Start and enable Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Install Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Pull latest backend image
+      shell: docker pull {{ dockerhub_username }}/medicare-backend:latest
+
+    - name: Pull latest frontend image
+      shell: docker pull {{ dockerhub_username }}/medicare-frontend:latest
+
+    - name: Copy docker-compose.prod.yml to EC2
+      copy:
+        src: ../docker-compose.prod.yml
+        dest: /home/ubuntu/docker-compose.prod.yml
+
+    - name: Create .env file on EC2
+      copy:
+        content: |
+          MONGO_URI={{ mongo_uri }}
+          EC2_PUBLIC_IP={{ ec2_public_ip }}
+        dest: /home/ubuntu/.env
+
+    - name: Stop existing containers
+      shell: docker-compose -f /home/ubuntu/docker-compose.prod.yml down
+      ignore_errors: yes
+
+    - name: Start containers with new images
+      shell: docker-compose -f /home/ubuntu/docker-compose.prod.yml up -d

@@ -5,13 +5,10 @@ pipeline {
         DOCKERHUB_USERNAME = 'pasindu2001'
         BACKEND_IMAGE      = "${DOCKERHUB_USERNAME}/medicare-backend"
         FRONTEND_IMAGE     = "${DOCKERHUB_USERNAME}/medicare-frontend"
-        EC2_USER           = 'ubuntu'
-        EC2_IP             = ''   // ← we'll fill this in Phase 4 after Terraform creates EC2
     }
 
     stages {
 
-        // ── Stage 1: Pull latest code ──────────────────────────────
         stage('Checkout') {
             steps {
                 echo 'Pulling latest code from GitHub...'
@@ -19,20 +16,14 @@ pipeline {
             }
         }
 
-        // ── Stage 2: Build Docker images ───────────────────────────
         stage('Build Images') {
             steps {
                 echo 'Building Docker images...'
-
-                // Build backend image
                 sh "docker build -t ${BACKEND_IMAGE}:latest ./backend"
-
-                // Build frontend image (production Nginx build)
                 sh "docker build -t ${FRONTEND_IMAGE}:latest ./frontend"
             }
         }
 
-        // ── Stage 3: Push images to Docker Hub ─────────────────────
         stage('Push to Docker Hub') {
             steps {
                 echo 'Pushing images to Docker Hub...'
@@ -48,37 +39,66 @@ pipeline {
             }
         }
 
-        // ── Stage 4: Provision infrastructure with Terraform ───────
         stage('Terraform Apply') {
             steps {
                 echo 'Provisioning AWS EC2 with Terraform...'
-                dir('terraform') {
-                    sh 'terraform init'
-                    sh 'terraform apply -auto-approve'
+                withCredentials([
+                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY'),
+                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_KEY')
+                ]) {
+                    dir('terraform') {
+                        sh 'terraform init'
+                        sh '''
+                            terraform apply -auto-approve \
+                                -var="aws_access_key=$AWS_ACCESS_KEY" \
+                                -var="aws_secret_key=$AWS_SECRET_KEY"
+                        '''
+                        // Capture the EC2 IP output from Terraform
+                        script {
+                            env.EC2_IP = sh(
+                                script: 'terraform output -raw ec2_public_ip',
+                                returnStdout: true
+                            ).trim()
+                        }
+                    }
                 }
+                echo "EC2 instance is at: ${env.EC2_IP}"
             }
         }
 
-        // ── Stage 5: Deploy containers with Ansible ─────────────────
         stage('Ansible Deploy') {
             steps {
-                echo 'Deploying containers to EC2 with Ansible...'
-                sshagent(['ec2-ssh-key']) {
-                    sh '''
-                        ansible-playbook -i ansible/inventory.ini \
-                            ansible/deploy.yml \
-                            --private-key ~/.ssh/ec2-key.pem \
+                echo "Deploying to EC2 at ${env.EC2_IP}..."
+                // Write the real EC2 IP into Ansible inventory
+                sh """
+                    sed -i 's/ansible_host=[0-9.]*/ansible_host=${env.EC2_IP}/' ansible/inventory.ini
+                """
+                // Copy the SSH key into Jenkins home
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'SSH_KEY'
+                    ),
+                    string(credentialsId: 'aws-secret-access-key', variable: 'MONGO_URI')
+                ]) {
+                    sh """
+                        # Disable strict host checking so Ansible doesn't hang
+                        export ANSIBLE_HOST_KEY_CHECKING=False
+                        export MONGO_URI='${env.MONGO_URI}'
+
+                        ansible-playbook ansible/deploy.yml \
+                            -i ansible/inventory.ini \
+                            --private-key $SSH_KEY \
                             -u ubuntu
-                    '''
+                    """
                 }
             }
         }
     }
 
-    // ── Post-pipeline notifications ─────────────────────────────────
     post {
         success {
-            echo '✅ Pipeline succeeded! App is deployed and live.'
+            echo "✅ Pipeline succeeded! App is live at http://${env.EC2_IP}"
         }
         failure {
             echo '❌ Pipeline failed. Check the stage logs above.'
