@@ -72,7 +72,8 @@ pipeline {
 
                 sh "sed -i 's/ansible_host=[0-9.]*/ansible_host=${env.EC2_IP}/' ansible/inventory.ini"
 
-                sh 'echo "Waiting 30s for EC2 to fully boot..." && sleep 30'
+                // Wait longer for EC2 to fully boot and accept SSH
+                sh 'echo "Waiting 60s for EC2 to fully boot..." && sleep 60'
 
                 withCredentials([
                     sshUserPrivateKey(
@@ -81,13 +82,16 @@ pipeline {
                     )
                 ]) {
                     sh """
-                        export ANSIBLE_HOST_KEY_CHECKING=False
+                        # Set Ansible config to use our local ansible.cfg
+                        export ANSIBLE_CONFIG=\$(pwd)/ansible/ansible.cfg
+
                         ansible-playbook ansible/deploy.yml \
                             -i ansible/inventory.ini \
                             --private-key \$SSH_KEY \
                             -u ubuntu \
                             -e "mongo_uri='${env.MONGO_URI}'" \
-                            -e "ec2_public_ip=${env.EC2_IP}"
+                            -e "ec2_public_ip=${env.EC2_IP}" \
+                            -vv
                     """
                 }
             }

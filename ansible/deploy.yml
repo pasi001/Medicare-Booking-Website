@@ -2,10 +2,11 @@
 - name: Deploy Medicare App to EC2
   hosts: ec2
   become: true
-
+  gather_facts: yes
   vars:
-    mongo_uri: "{{ lookup('env', 'MONGO_URI') }}"
-    ec2_public_ip: "{{ ansible_host }}"
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o ControlMaster=no -o ControlPersist=no'
+    mongo_uri: "{{ mongo_uri }}"
+    ec2_public_ip: "{{ ec2_public_ip }}"
     dockerhub_username: "pasindu2001"
 
   tasks:
