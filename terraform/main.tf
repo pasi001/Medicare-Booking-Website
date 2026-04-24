@@ -47,10 +47,10 @@ resource "aws_security_group" "medicare_sg" {
   }
 }
 
-# EC2 instance — t2.micro = free tier
+# EC2 instance — t3.micro = free tier
 resource "aws_instance" "medicare_server" {
   ami                    = "ami-0c7217cdde317cfec"  # Ubuntu 22.04 LTS (us-east-1)
-  instance_type          = "t2.micro"
+  instance_type          = "t3.micro"
   key_name               = "medicare-key"
   vpc_security_group_ids = [aws_security_group.medicare_sg.id]
 
